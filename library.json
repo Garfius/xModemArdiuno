@@ -5,11 +5,12 @@
   "keywords": "xmodem, crc, serial, file transfer, sd, communication",
   "repository": {
     "type": "git",
-    "url": "https://github.com/"
+    "url": "https://github.com/Garfius/xModemArdiuno.git"
   },
   "authors": [
     {
-      "name": "",
+        "name": "Gerard Forcada",
+        "email": "garfius@gmail.com",
       "maintainer": true
     }
   ],
