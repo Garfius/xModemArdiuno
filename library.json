@@ -1,5 +1,5 @@
 {
-  "name": "XModem garfius",
+  "name": "xModemArdiuno",
   "version": "1.0.0",
   "description": "Half-duplex file transfer using the XModem and XModem/CRC protocols over any Stream. Send and receive whole files to/from an SD card (or LittleFS) with progress, error, and overwrite-confirmation callbacks.",
   "keywords": "xmodem, crc, serial, file transfer, sd, communication",
