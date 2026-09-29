@@ -2,13 +2,17 @@
 
 An Arduino library for half-duplex file transfer using the **XModem** and
 **XModem/CRC** protocols over any `Stream` (for example, a hardware `Serial`
-port). Received data is stored on, and sent data is read from, an SD card.
+port). Data is read from and written to any `fs::FS` filesystem you pass to
+`begin()` — for example `LittleFS` or `SDFS`.
+
+Created and tested using [Arduino-Pico by earlephilhower/maxgerhardt](https://github.com/earlephilhower/arduino-pico) on [Platformio](https://marketplace.visualstudio.com/items?itemName=platformio.platformio-ide)
 
 ## Features
 
 - Classic **XMODEM** (128-byte blocks, 8-bit checksum) and **XMODEM/CRC**
   (CRC-16/XMODEM) variants.
-- Send and receive whole files to/from an SD card.
+- Send and receive whole files to/from any `fs::FS` filesystem (`LittleFS`,
+  `SDFS`, ...).
 - Progress, error, and overwrite-confirmation callback.
 - Configurable block id size, checksum size, data size, retry limit, and
   signal-retry delay for talking to non-standard peers.
@@ -18,19 +22,21 @@ port). Received data is stored on, and sent data is read from, an SD card.
 
 1. Copy this repository into your Arduino `libraries` folder (or install it as
    a `.zip` library from the Arduino IDE).
-2. Make sure the bundled `SD` library is available, since `XModem.h` includes
-   `<SD.h>`.
+2. Make sure a filesystem that implements `fs::FS` is available (for example the
+   RP2040/ESP core's `LittleFS` or `SDFS`); `XModem.h` only includes `<FS.h>`.
 3. Restart the Arduino IDE.
 
 ## Dependencies
 
-- [`SD`](https://github.com/arduino-libraries/SD) — storage backend (included
-  via `XModem.h`).
+- An `fs::FS`-based filesystem such as [`LittleFS`](https://github.com/earlephilhower/arduino-pico/tree/master/libraries/LittleFS)
+  or `SDFS` (provided by the RP2040/ESP core). `XModem.h` includes `<FS.h>`
+  only; you include and mount the concrete filesystem in your sketch.
 
 ## Quick start
 
 ```cpp
-#include <XModem.h>   // pulls in <SD.h>
+#include <SDFS.h>     // arduino-pico core SD filesystem (fs::FS)
+#include <XModem.h>
 
 const uint8_t SD_CS = 4;
 
@@ -49,20 +55,21 @@ void setup() {
   Serial.begin(115200);     // console
   Serial1.begin(115200);    // XModem transfer link
 
-  if (!SD.begin(SD_CS)) {
+  SDFS.setConfig(SDFSConfig(SD_CS));
+  if (!SDFS.begin()) {
     Serial.println("SD init failed");
     while (true) {}
   }
 
   myXModem.onXmodemUpdate(onXmodemUpdate);
-  myXModem.begin(&Serial1, XModem::CRC_XMODEM);
+  myXModem.begin(&Serial1, XModem::CRC_XMODEM, SDFS);
 }
 
 void loop() {
-  // Send a file from the SD card:
+  // Send a file from the filesystem:
   myXModem.sendFile("data.bin");
 
-  // Or receive a file onto the SD card:
+  // Or receive a file onto the filesystem:
   myXModem.receiveFile("incoming.bin");
 }
 ```
@@ -78,16 +85,32 @@ void loop() {
 | Method | Description |
 | --- | --- |
 | `onXmodemUpdate(callback)` | Register the progress/error/confirmation callback. Must be set before `begin()`. |
-| `begin(stream, type)` | Configure the transfer stream and protocol (`XModem::XMODEM` or `XModem::CRC_XMODEM`). Returns `false` if no callback is registered. |
+| `begin(stream, type, fs)` | Configure the transfer stream, protocol (`XModem::XMODEM` or `XModem::CRC_XMODEM`), and the `fs::FS` filesystem to store to / read from (e.g. `LittleFS`, `SDFS`). Returns `false` if no callback is registered. |
 
 ### Transfers
 
 | Method | Description |
 | --- | --- |
-| `receiveFile(path, size, binary)` | Receive a file and write it to `path` on the SD card. |
-| `sendFile(path)` | Send the file at `path` from the SD card. |
+| `receiveFile(path, size, binary)` | Receive a file and write it to `path` on the filesystem. |
+| `sendFile(path)` | Send the file at `path` from the filesystem. |
 | `send(data, len, start_id)` | Send a single in-memory buffer as one block. |
-| `pathAssert(path)` | Create any missing intermediate directories on the SD card. |
+| `pathAssert(path)` | Create any missing intermediate directories on the filesystem. |
+
+> **⚠️ Important — the `size` argument of `receiveFile()`:** XModem always
+> transfers data in fixed 128-byte blocks and pads the final block with `SUB`
+> (`0x1A`) filler bytes. If you leave `size` at its default (`-1`, unknown), the
+> file written to disk is stored verbatim and its size is therefore **rounded up
+> to the next multiple of 128 bytes** (the padding is kept). To recover the
+> *exact* original file size, you must pass the real byte count as `size`;
+> `receiveFile()` then truncates the last block so the stored file matches the
+> original length precisely.
+>
+> Because the classic XModem protocol does **not** transmit the file size in-band,
+> the sender cannot tell the receiver how large the file is. You must obtain the
+> length through a **separate, out-of-band method** (for example, agree on it
+> beforehand, or send it over another channel / a preceding message) and hand it
+> to `receiveFile(path, size)`. Without that value the receiver can only produce a
+> 128-byte-aligned file, not the exact original size.
 
 ### Tuning (override the defaults from `begin()`)
 

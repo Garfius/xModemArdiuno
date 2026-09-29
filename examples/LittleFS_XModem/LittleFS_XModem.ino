@@ -9,14 +9,15 @@
  * XModem transfer runs over a second UART (Serial1) so the binary protocol
  * never collides with the interactive menu.
  *
- * NOTE: the bundled XModem library persists through the global SD object
- * (see <SD.h>, included by XModem.h). LittleFS is mounted here for local
- * file management; move the received data across with LittleFS APIs if your
- * board has no SD card, or refactor XModem to target LittleFS directly.
+ * The XModem library is filesystem-agnostic: begin() takes the fs::FS to use,
+ * so passing LittleFS makes every send/receive read and write LittleFS
+ * directly - the same filesystem listFiles() enumerates below.
  */
 
 #include <LittleFS.h>
 #include <XModem.h>
+#define serialConsole Serial1
+#define serialXModem Serial2
 
 const unsigned long CONSOLE_BAUD = 115200;
 const unsigned long LINK_BAUD = 115200;
@@ -26,40 +27,40 @@ const unsigned long LINK_BAUD = 115200;
 bool onXmodemUpdate(uint8_t code, uint8_t value) {
   switch (code) {
     case 0:  // a data block crossed the link ok
-      Serial.print(F("  block ok: "));
-      Serial.println(value);
+      serialConsole.print(F("  block ok: "));
+      serialConsole.println(value);
       break;
     case 1:
       if (value == 1) {
-        Serial.println(F("  destination exists - overwriting"));
+        serialConsole.println(F("  destination exists - overwriting"));
       } else {
-        Serial.println(F("  file not found"));
+        serialConsole.println(F("  file not found"));
       }
       break;
     case 2:
-      Serial.println(F("  storage error"));
+      serialConsole.println(F("  storage error"));
       break;
     case 3:  // protocol / signalling event, value carries the detail
-      Serial.print(F("  protocol event: "));
-      Serial.println(value);
+      serialConsole.print(F("  protocol event: "));
+      serialConsole.println(value);
       break;
   }
   return true;
 }
 
 char readChar() {
-  while (Serial.available()) Serial.read();   // flush stale input
-  while (!Serial.available()) {}
-  return Serial.read();
+  while (serialConsole.available()) serialConsole.read();   // flush stale input
+  while (!serialConsole.available()) {}
+  return serialConsole.read();
 }
 
 String promptLine(const __FlashStringHelper *msg) {
-  Serial.print(msg);
-  while (Serial.available()) Serial.read();   // flush stale input
+  serialConsole.print(msg);
+  while (serialConsole.available()) serialConsole.read();   // flush stale input
   String line = "";
   for (;;) {
-    if (Serial.available()) {
-      char c = Serial.read();
+    if (serialConsole.available()) {
+      char c = serialConsole.read();
       if (c == '\n' || c == '\r') {
         if (line.length() > 0) break;
       } else {
@@ -67,48 +68,73 @@ String promptLine(const __FlashStringHelper *msg) {
       }
     }
   }
-  Serial.println(line);
+  serialConsole.println(line);
   return line;
 }
 
-void setup() {
-  Serial.begin(CONSOLE_BAUD);
-  while (!Serial) {}                 // wait for the USB console
-  Serial1.begin(LINK_BAUD);          // XModem transfer link
+// Prints every file (recursing into sub-directories) so the user can see what
+// is available to send. The RP2040/ESP LittleFS wrapper iterates directories
+// through openDir()/fs::Dir rather than the SD-style openNextFile().
+void listFiles(const char *path, uint8_t depth) {
+  fs::Dir dir = LittleFS.openDir(path);
+  while (dir.next()) {
+    for (uint8_t i = 0; i <= depth; i++) serialConsole.print(F("  "));
+    serialConsole.print(dir.fileName());
+    if (dir.isDirectory()) {
+      serialConsole.println('/');
+      String sub = String(path);
+      if (!sub.endsWith("/")) sub += '/';
+      sub += dir.fileName();
+      listFiles(sub.c_str(), depth + 1);
+    } else {
+      serialConsole.print(F("\t"));
+      serialConsole.println(dir.fileSize());
+    }
+  }
+}
 
-  Serial.println(F("LittleFS + XModem example"));
+void setup() {
+  serialConsole.begin(CONSOLE_BAUD);
+  while (!serialConsole) {}                 // wait for the USB console
+  serialXModem.begin(LINK_BAUD);          // XModem transfer link
+
+  serialConsole.println(F("LittleFS + XModem example"));
 
   if (!LittleFS.begin()) {
-    Serial.println(F("LittleFS mount failed - format the flash and retry"));
+    serialConsole.println(F("LittleFS mount failed - format the flash and retry"));
     while (true) {}
   }
 
   myXModem.onXmodemUpdate(onXmodemUpdate);
-  if (!myXModem.begin(&Serial1, XModem::CRC_XMODEM)) {
-    Serial.println(F("XModem begin() failed"));
+  if (!myXModem.begin(&serialXModem, XModem::CRC_XMODEM, LittleFS)) {
+    serialConsole.println(F("XModem begin() failed"));
     while (true) {}
   }
 }
 
 void loop() {
-  Serial.println();
-  Serial.println(F("Choose an action:"));
-  Serial.println(F("  [S] send a file"));
-  Serial.println(F("  [R] receive a file"));
-  Serial.print(F("> "));
+  serialConsole.println();
+  serialConsole.println(F("available files:"));
+  listFiles("/", 0);
+
+  serialConsole.println();
+  serialConsole.println(F("Choose an action:"));
+  serialConsole.println(F("  [S] send a file"));
+  serialConsole.println(F("  [R] receive a file"));
+  serialConsole.print(F("> "));
 
   char choice = readChar();
-  Serial.println(choice);
+  serialConsole.println(choice);
 
   if (choice == 's' || choice == 'S') {
     String path = promptLine(F("file to send: "));
-    Serial.println(F("waiting for the receiver..."));
-    Serial.println(myXModem.sendFile(path) ? F("send complete") : F("send failed"));
+    serialConsole.println(F("waiting for the receiver..."));
+    serialConsole.println(myXModem.sendFile(path) ? F("send complete") : F("send failed"));
   } else if (choice == 'r' || choice == 'R') {
     String path = promptLine(F("save received file as: "));
-    Serial.println(F("waiting for the sender..."));
-    Serial.println(myXModem.receiveFile(path) ? F("receive complete") : F("receive failed"));
+    serialConsole.println(F("waiting for the sender..."));
+    serialConsole.println(myXModem.receiveFile(path) ? F("receive complete") : F("receive failed"));
   } else {
-    Serial.println(F("unknown option"));
+    serialConsole.println(F("unknown option"));
   }
 }

@@ -11,7 +11,7 @@
 #ifndef XModem_h
 #define XModem_h
 #include "Arduino.h"
-#include <SD.h>
+#include <FS.h>
 //XModem constants
 #define SOH (byte) 0x01 //Start of Header
 #define EOT (byte) 0x04 //End of Transmission
@@ -41,9 +41,10 @@ class XModem {
      * registered via onXmodemUpdate()) before receiveFile()/sendFile()/send().
      * @param serial stream used for the transfer (e.g. &Serial).
      * @param type protocol variant; sets id/checksum/data block sizes and init byte.
+     * @param fs filesystem the transfer reads from / writes to (e.g. LittleFS or SDFS).
      * @return false if no update callback has been registered yet.
      */
-    bool begin(Stream *serial, XModem::ProtocolType type = XModem::ProtocolType::XMODEM);
+    bool begin(Stream *serial, XModem::ProtocolType type, fs::FS &fs);
 
     // SETTERS - override the defaults applied by begin() for non-standard peers
     void setIdSize(size_t size);              ///< Bytes per block id (default 1).
@@ -59,7 +60,7 @@ class XModem {
     bool pathAssert(const char * path);
 
     /** Receives a file over the link and writes it to filePath on the SD card, deleting a partial file on failure. */
-    bool receiveFile(String filePath,unsigned int size=-1, bool binary=false);
+    bool receiveFile(String filePath,unsigned int size=-1, bool binary=true);
 
     /** Sends a single in-memory buffer as one block starting at start_id. */
     bool send(byte data[], size_t data_len, unsigned long start_id= 1);
@@ -91,10 +92,11 @@ class XModem {
 
     unsigned int sizeKnown=-1; ///< Expected total transfer size in bytes; -1 means unknown.
 
-    File workingFile; ///< SD file currently open for the in-progress send/receive.
+    fs::File workingFile; ///< File currently open for the in-progress send/receive.
 
   private:
     Stream *_serial;                 ///< Stream used for the transfer.
+    fs::FS *_fs = nullptr;           ///< Filesystem backing the transfer (set by begin()).
     ProtocolType _protocol;          ///< Active protocol variant (may change during init_tx()/init_rx()).
     byte _rx_init_byte;              ///< Byte the receiver sends to request/start a transfer.
     size_t _id_bytes;                ///< Bytes per block id.

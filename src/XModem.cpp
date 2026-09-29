@@ -12,9 +12,10 @@ XModem::XModem(){
 void XModem::onXmodemUpdate(bool(*callback)(uint8_t code, uint8_t value)){
   _onXmodemUpdateHandler = callback;
 }
-bool XModem::begin(Stream *serial, XModem::ProtocolType type) {
+bool XModem::begin(Stream *serial, XModem::ProtocolType type, fs::FS &fs) {
   if (this->_onXmodemUpdateHandler == nullptr)return false;
   _serial = serial;
+  _fs = &fs;
   _protocol = type;
   switch(type) {
     case ProtocolType::XMODEM:
@@ -83,8 +84,8 @@ bool XModem::pathAssert(const char * path){// no pot començar amb / not start /
   int pos = stringPath.indexOf('/');
   while (pos > 0 ) {
     build = stringPath.substring(0,pos);
-    if (!SD.exists(build.c_str())) {// <------ mkdir
-      if (!SD.mkdir(build.c_str())) {
+    if (!_fs->exists(build.c_str())) {// <------ mkdir
+      if (!_fs->mkdir(build.c_str())) {
         //Serial.println("F");
         return false;
         }
@@ -93,8 +94,8 @@ bool XModem::pathAssert(const char * path){// no pot començar amb / not start /
       pos = stringPath.indexOf('/',pos+1);
   }
   
-  if (!SD.exists(path)) {// <------ mkdir
-      if (!SD.mkdir(path)) {
+  if (!_fs->exists(path)) {// <------ mkdir
+      if (!_fs->mkdir(path)) {
         //Serial.println("F");
         return false;
         }
@@ -119,7 +120,7 @@ bool XModem::receiveFile(String filePath,unsigned int size, bool binary){
   
   if(!this->receive()){
       closeFiles();  
-      SD.remove(filePath.c_str());
+      _fs->remove(filePath.c_str());
       return false;
   }
   closeFiles();
@@ -247,13 +248,13 @@ void XModem::calc_chksum (byte *data, size_t dataSize, byte *chksum){
 }
 bool XModem::openFiles(const char * filePath, bool write){
     if(write){
-      if(SD.exists(filePath)){
+      if(_fs->exists(filePath)){
         if(!_onXmodemUpdateHandler(1,1))return false;/** delete file warning */
-        SD.remove(filePath);
+        _fs->remove(filePath);
       }
-      workingFile = SD.open(filePath, FILE_WRITE);
+      workingFile = _fs->open(filePath, "w");
     }else{
-        workingFile = SD.open(filePath, FILE_READ);
+        workingFile = _fs->open(filePath, "r");
         workingFile.seek(0);
     }
     
